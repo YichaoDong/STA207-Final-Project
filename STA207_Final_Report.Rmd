@@ -1,0 +1,791 @@
+---
+title: "STA207 Final Project"
+author: "Yichao Dong"
+date: "2025-03-15"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H')
+knitr::opts_chunk$set(warning = FALSE, massage = FALSE)
+library(dplyr)
+library(ggplot2)
+library(gplots)
+library(haven)
+library(naniar)
+library(MissMech)
+library(mice)
+library(VIM)
+library(knitr)
+library(gt)
+library(gridExtra)
+library(tidyr)
+library(car)
+library(lmerTest)
+```
+
+The code for this report has been shared on Github: https://github.com/YichaoDong/STA207-Final-Project
+
+# 1. Abstract
+This study investigates the impact of class type and educational backgrounds on students' academic performance using first-grade mathematics scores from Project STAR. The dataset, obtained from Harvard Dataverse, enables an analysis of the relationship between class size and math achievement. The hypothesis proposes that different class sizes significantly affect students' first-year math scores, with further exploration into the optimal class type for student performance. A mixed-effects model was employed, treating school ID as a random effect and class type as a fixed effect, to account for hierarchical data structures. Results suggest that smaller class sizes have a positive effect on students' math scores. Statistical diagnostics confirm the model's validity, ensuring the robustness of the findings.
+
+# 2. Introduction
+This report aims to shed light on the effects of class type and educational backgrounds on student academic performance by examining the first-grade mathematical scores from project STAR. The raw data used in this study can be found from Harvard Dataverse publicly. The hypothesis of the study is different class sizes will significantly affect the first-year math scores. If the hypothesis held, further analysis will be conducted to investigate which class size would yield the best performance among the first year students. The class will be treated as the key unit, and other variables related to class backgrounds will be included to reveal their combined effect on the math scores.
+
+At the same time, drawing on the rich dataset provided by the STAR project, the study aims to uncover causal relationships by exploring potential confounding variables that may together influence students’ academic outcomes. Simultaneously, the study will also revise the potential shortcomings in the initial analysis. Consequently, the report aims to emphasize how class size, class type and other educational backgrounds pose influences on general academic performance of students. 
+
+# 3. Background
+Project STAR (Student/Teacher Achievement Ratio) is one of the best-known large-scale randomized controlled experiments in U.S. education research on the effects of class size on student academic performance. The study was conducted over a four-year period beginning in 1985 and involved approximately 6500 students and 1300 teachers, covering kindergarten through third grade.
+
+Previous studies have generated extensive evidence on the positive effects on small class size. Krueger (1999) used the STAR data to estimate the causal relationship between class size and student achievement, finding that students in small classes performed significantly better on standardized tests. Schanzenbach (2006) provided a comprehensive synthesis of the STAR literature, confirming the substantial and lasting benefits of small class sizes. Collectively, these studies demonstrate that class size reduction is an effective and applicable method to improve academic performances.
+
+The data in the dataset included a wide range of variables, including student demographics, classroom characteristics, teacher characteristics, student outcomes, and school-level variables, which made it an ideal resource to conduct educational research. The randomized design ensured that differences in student outcomes across classroom types can be attributed to class size rather than student or teacher characteristics. The dataset allowed for analysis of both overall trends and differential impacts across groups, such as students from minority or low-income backgrounds. Meanwhile, the longitudinal nature of the data allowed researchers to examine both short-term academic effects and long-term educational attainment, making the dataset particularly valuable for education policy analysis. Nye, Hedges, and Konstantopoulos (2000) conducted a comprehensive reanalysis of Project STAR data, emphasizing the cumulative academic effects of small class attendance.
+
+# 4. Experimental Design
+The project STAR initiative aimed to evaluate the causal impact of class size on students' academic performance. The study followed students from kindergarten through third grade, with students randomly assigned to one of three classroom types (small: 13-17; regular: 22-25; regular with aide: 22-25). This random assignment was essential to minimizing selection bias, ensuring that observed differences could be directly attributed to class size.
+
+In addition to tracking students' standardized test scores, the STAR project collected extensive metadata, including non-academic indicators such as attendance, motivation, and classroom engagement. Moreover, student demographic characteristics, teacher qualifications, and school-level contextual factors were incorporated, helping to control for potential confounders and enhance the generality of the findings.
+
+Despite its strength, the STAR project's experimental design has several limitations. First, the study excluded potential variations within intermediate class size (18-21 students). Furthermore, the potential influence of having a teacher aide in small classes was not fully disentangled or separately quantified.
+
+As a long-term study, STAR project faced additional challenges related to student mobility, school changes, and dropouts, all of which could give rise to selection bias and complicate the maintenance of stable samples over time.
+
+In summary, project STAR offers valuable empirical insights into the effects of class size on educational outcomes. However, given the inherent limitations in its experimental design, caution is warranted when interpreting and generalizing its findings.
+
+# 5. Caveats
+
+## 5.1 Missing value analysis
+```{r, include=FALSE}
+# Import data and select related variables
+data <- read_sav("STAR_Students.sav")
+grade1 <- data[, c(1:6,8,55:81)]
+grade1$g1classtype <- data$g1classtype
+```
+
+```{r, include=FALSE}
+# Data preprocessing
+# Divide data into two parts: engaged in STAR or not
+star_related <- grade1 %>% filter(FLAGSG1 == 1)
+star_unrelated <- grade1 %>% filter(FLAGSG1 == 0)
+
+# Remove useless columns
+star_related <- star_related %>% dplyr::select(-stdntid)
+star_related <- star_related %>% dplyr::select(-FLAGSG1)
+
+# Define categorical variables
+star_related$gender <- as.factor(star_related$gender)
+star_related$race <- as.factor(star_related$race)
+star_related$g1schid <- as.factor(star_related$g1schid)
+star_related$g1surban <- as.factor(star_related$g1surban)
+star_related$g1tgen <- as.factor(star_related$g1tgen)
+star_related$g1trace <- as.factor(star_related$g1trace)
+star_related$g1thighdegree <- as.factor(star_related$g1thighdegree)
+star_related$g1tcareer <- as.factor(star_related$g1tcareer)
+star_related$g1freelunch <- as.factor(star_related$g1freelunch)
+star_related$g1classtype <- as.factor(star_related$g1classtype)
+
+# Rename of columns
+star_related$gender <- factor(star_related$gender, levels=c('1','2'), labels=c('Male','Female'))
+star_related$race <- factor(star_related$race, levels=c('1','2','3','4','5','6'), labels=c('White','Black','Asian','Hispanic','Native American','Other'))
+star_related$g1surban <- factor(star_related$g1surban, levels=c('1','2','3','4'), labels=c('Inner City','Suburban','rural','urban'))
+star_related$g1tgen <- factor(star_related$g1tgen, levels=c('1','2'), labels=c('Male','Female'))
+star_related$g1trace <- factor(star_related$g1trace, levels=c('1','2','3','4','5','6'), labels=c('White','Black','Asian','Hispanic','Native American','Other'))
+star_related$g1thighdegree <- factor(star_related$g1thighdegree, levels=c('1','2','3','4','5','6'), labels=c('Associates','Bachelors','Masters','Masters +','Specialist','Doctoral'))
+star_related$g1tcareer <- factor(star_related$g1tcareer, levels=c('1','2','3','4','5','6','7'), labels=c('Chose not to be on career ladder','Apprentice','Probation','Ladder Level 1','Ladder Level 2','Ladder Level 3','Pending'))
+star_related$g1freelunch <- factor(star_related$g1freelunch, levels=c('1','2'), labels=c('Free Lunch','Non-free Lunch'))
+star_related$g1classtype <- factor(star_related$g1classtype, levels=c('1','2','3'), labels=c('Small Class','Regular Class','Regular + Aide Class'))
+```
+
+### 5.1.1 Caveat description
+In the initial analysis report, the justification for treating missing values (NA) as a new variable was insufficiently supported. Although the report identified the presence of missing data in certain variables, it failed to thoroughly examine the source, pattern, and potential mechanisms behind the missing values. Moreover, directly treating missing values as a new variable lacked theoretical justification and statistical rationale. This approach may trigger additional bias, especially when the missing values are not completely at random, potentially distorting the interpretation of the results. The report should propose a more reasonable strategy for addressing the missing values, providing more context to explain the rationale for the new approach and assess its potential impact on the overall analysis.
+
+### 5.1.2 Analysis of missing data in Project STAR
+The STAR dataset comprises information on 11,601 students who participated in the project over multiple years. This study specifically examines the impact of the STAR project on first-grade students' mathematical performance, focusing on variables related to this grade level. Within the dataset, 6,829 students were actively enrolled in STAR during their first-grade year, while 4,772 students exited the project at this stage.
+
+Our analysis focuses on the subset of students who participated in the STAR project during their first-grade year, as they represent the primary emphasis of this study. The histogram provides a comprehensive summary of missing data across 32 relevant variables, incorporating student demographics, academic performance, teacher characteristics, and school-level attributes. Notably, several variables, including *g1wordskillss*, *g1selfconcraw*, *g1motivraw*, *g1readbsobjraw*, *g1readbsobjpct*, *g1mathbsobjraw* and *g1mathbsobjpct*, exhibit a missing data proportion exceeding 10%. In contrast, variables such as *g1treadss*, *g1mathbsraw*, *g1readbsraw*, *g1tlistss*, *g1tmathss*, *g1freelunch*, *g1promote*, *g1present* and *g1absent* display a moderate proportion of missing data, ranging between 2% and 10%. The remaining variables exhibit relatively low levels of missing data, with proportion below 2%.
+
+```{r, echo=FALSE, results='hide', fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 1. Histogram of missing values among each variables"}
+# Analysis overall missing data
+na_counts <- sapply(star_related, function(x) sum(length(which(is.na(x)))))
+na_percentage <- sapply(star_related, function(x) mean(is.na(x))) * 100
+
+na_data <- data.frame(NA_Count = na_counts,
+                      NA_Percentage = na_percentage)
+
+ggplot(na_data, aes(x = reorder(row.names(na_data), -NA_Count), y = NA_Count, label = sprintf("%.1f%%", NA_Percentage))) + 
+  geom_bar(stat = "identity", fill = "steelblue") + 
+  geom_text(aes(label = sprintf("%.1f%%", NA_Percentage)),hjust = -0.2, size = 3) + 
+  coord_flip() + 
+  ylim(0, max(na_data$NA_Count) * 1.2) + 
+  labs(title = "Missing values count per variable of \n 1st-grade students participated in STAR",
+       x = "Variables", y = "NA Counts") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 14))
+```
+
+### 5.1.3 Assessment of missng values
+Based on the findings of missing value analysis and Figure 1, several variables are considered to be more closely associated with the missing of mathematical performance of first-grade students. These variables are identified as more appropriate for inclusion in a logistic regression analysis to assess whether the presence of missing values introduces bias into the experimental results. Others demonstrate minimal relevance to the experimental outcomes and are unlikely to introduce substantial bias. The remaining variables require further investigation to determine whether their missing values conform to the missing completely at random (MCAR) assumption. To rigorously verify this, Little’s MCAR Test will be conducted to determine whether the missing values in these variables contribute to systematic biases in the study's results.
+
+#### 5.1.3.1 Logistic regression analysis
+The results of the logistic regression analysis indicate that the coefficients for *Asian* race, *Native American* race, and *non-free lunch* status have p-values smaller than 0.05, suggesting that missing values in these variables may affect the missing of *g1tmathss*. However, upon further examination of the dataset, it is observed that the combined proportion of Asian and Native American students accounts for less than 1% of the total student population. Given this minimal representation, the missing data associated with these groups are unlikely to introduce significant bias into the experimental results.
+
+```{r, include=FALSE}
+# Logistic regression
+star_related$g1tmathss_missing <- as.numeric(is.na(star_related$g1tmathss))
+
+star_related_logistic <- star_related %>%
+  dplyr::select(gender, race, g1schid, g1surban, g1tgen, g1trace, g1thighdegree, g1tcareer, g1freelunch, g1classtype, g1tmathss_missing)
+
+missing_model <- glm(g1tmathss_missing ~ gender + race + g1schid + g1surban + g1tgen + g1trace + g1thighdegree + g1tcareer + g1freelunch + g1classtype, 
+                     data = star_related_logistic, 
+                     family = "binomial")
+summary(missing_model)
+```
+
+#### 5.1.3.2 Missing completely at random (MCAR) test
+The p-value, being significantly lower than 0.05, indicates that the missing data do not follow the assumption of being missing completely at random (MCAR). This suggests that the data are more likely to be missing at random (MAR) or missing not at random (MNAR). Consequently, the direct removal of missing data may introduce bias into the analysis, potentially affecting the validity of the results.
+
+```{r, include=FALSE}
+# MCAR test
+mcar_test <- star_related %>%
+  dplyr::select(g1tmathss, g1mathbsraw, g1mathbsobjraw, g1mathbsobjpct, g1promote, g1present, g1absent, g1freelunch)
+
+naniar::mcar_test(mcar_test)
+```
+
+### 5.1.4 Methods for handling missing values
+
+#### 5.1.4.1 Deletion
+There are two primary types of deletion methods for handling missing data: listwise deletion and column-wise deletion. Both approaches are appropriate when the data are missing completely at random (MCAR).
+
+When the proportion of missing values in the dataset is relatively small, listwise deletion can be implemented without significantly impacting the validity of the results. Conversely, when the proportion of missing values is substantially high, column-wise deletion may be a more suitable approach, as imputing a large amount of missing data can be challenging and may introduce additional bias.
+
+Since the data do not satisfy the assumption of missing completely at random (MCAR), neither listwise deletion nor column-wise deletion will be applied.
+
+#### 5.1.4.2 Imputation
+Single imputation, regression imputation, and multiple imputation are three common techniques for handling missing data, each varying in complexity and effectiveness. The imputation approaches are appropriate when the data are MAR or MNAR.
+
+Single imputation provides a simple approach by replacing missing values with a single estimate, such as the mean, median, or mode, but it fails to capture uncertainty and may introduce bias.
+
+Regression imputation improves upon this by predicting missing values based on observed relationships with other variables. However, it tends to overfit and underestimate variance.
+
+Multiple imputation offers the most statistically robust solution by generating multiple plausible values for each missing data point and combining results across imputations, preserving variability and reducing bias. Although multiple imputation reduces bias and improves statistical validity, it is computationally intensive and requires careful model specification to ensure reliable imputations.
+
+## 5.2 Model incompleteness
+The initial two-way ANOVA model may not sufficiently capture the underlying factors influencing math scores, potentially limiting its explanatory power.
+
+Finn and Achilles (1999) highlighted that variables such as urbanity and free lunch status significantly impact students' academic performance. Furthermore, economic conditions play a crucial role in shaping educational outcomes, as students from disadvantaged backgrounds are more likely to be placed in specific class types, which in turn, may influence their math scores. The omission of these factors from the model could lead to biased estimates and reduced model accuracy. Therefore, incorporating these variables into the analysis is essential to enhance model fit and mitigate the risk of omitted variable bias.
+
+# 6. Descriptive analysis
+
+## 6.1 Univariate statistics
+
+### 6.1.1 Numerical variables
+The distributions of the four types of math scores exhibit distinct variations. Notably, *g1tmathss* closely approximates a normal distribution and has a relatively low proportion of missing values, distinguishing it from the others.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.align='center', fig.cap="Figure 2. Distributions of four types of math scores"}
+# Histograms with density lines of four score types 
+plot1 <- ggplot(data = star_related, aes(x = g1tmathss)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 15, fill = "grey") + 
+  geom_density(color = "steelblue") + 
+  ggtitle("Total Math Scale Score SAT") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+plot2 <- ggplot(data = star_related, aes(x = g1mathbsraw)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 4, fill = "grey") + 
+  geom_density(color = "steelblue") + 
+  ggtitle("Math Raw Score BSF") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+plot3 <- ggplot(data = star_related, aes(x = g1mathbsobjraw)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 1, fill = "grey") + 
+  geom_density(color = "steelblue") + 
+  ggtitle("Math Number Objectives Mastered BSF") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+plot4 <- ggplot(data = star_related, aes(x = g1mathbsobjpct)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 10, fill = "grey") + 
+  geom_density(color = "steelblue") + 
+  ggtitle("Math Percentage Objectives Mastered BSF") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+
+combined_plots <- grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+combined_plots
+```
+
+
+The table presents descriptive statistics for *g1tmathss*, the key variable of primary interest. The mean (530.53) and median (529.00) are closely aligned, indicating that the distribution of *g1tmathss* is approximately symmetric, with no significant skewness. The standard deviation and the interquartile range suggest a moderate level of variability within the dataset. Notably, the presence of 231 missing values constitutes a substantial proportion of the data, necessitating appropriate handling to mitigate potential bias in subsequent analysis.
+
+```{r, echo=FALSE, results='asis', warning=FALSE}
+# g1tmathss
+descriptive_statistics_g1tmathss <- star_related %>%
+  summarise(
+    Statistic = c("Mean", "Median", "Standard deviation", "1st quantile", "3rd quantile", "Missing values"),
+    Value = c(round(mean(g1tmathss, na.rm=TRUE), 2),
+              round(median(g1tmathss, na.rm=TRUE), 2),
+              round(sd(g1tmathss, na.rm=TRUE), 2),
+              round(quantile(g1tmathss, 0.25, na.rm=TRUE), 2),
+              round(quantile(g1tmathss, 0.75, na.rm=TRUE), 2),
+              round(sum(is.na(g1tmathss)), 2))
+  )
+
+# Table for descriptive statistics
+descriptive_statistics_g1tmathss %>%
+  gt() %>%
+  tab_header(
+    title = md("**Descriptive Statistics of Grade 1 Math Scores (SAT)**")
+  ) %>%
+  tab_options(
+    table.font.size = "small",
+    heading.align = "center"
+  )
+```
+
+Comparatively, *g1tmathss* is the preferred choice for subsequent analyses, as the QQ plot indicates that it closely follows a normal distribution, with only a limited number of outliers present.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 3. Q-Q plot of *g1tmathss*"}
+# Q-Q plot
+ggplot(data = star_related, aes(sample = g1tmathss)) + 
+  stat_qq() + 
+  stat_qq_line() + 
+  ggtitle("Q-Q plot of g1tmathss") + 
+  xlab("Theoretical quantiles") + 
+  ylab("Sample quantiles") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+Since the mean and median distributions are nearly identical, with no evidence of strong skewness or extreme outliers, the mean serves as the more appropriate measure for subsequent analysis. Unlike the median, which disregards variability within the data, the mean incorporates all data points, preserving the overall distributional characteristics. Moreover, when the data follow a normal or approximately symmetric distribution, the mean offers superior statistical properties, making it a more robust choice for further analysis.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 4. Comparison between mean and median across class types"}
+summary_stats <- star_related %>%
+  group_by(g1classtype, g1schid, g1surban, g1classsize) %>%
+  summarize(
+    mean = mean(g1tmathss, na.rm = TRUE),
+    median = median(g1tmathss, na.rm = TRUE),
+  ) %>%
+  pivot_longer(cols = c(mean, median), names_to = "Statistic", values_to = "Score")
+
+ggplot(star_related, aes(x = g1tmathss)) + 
+  geom_density(data = summary_stats, aes(x = Score, color = Statistic), size = 1) + 
+  facet_wrap(~ g1classtype) + 
+  scale_color_manual(values = c("red", "blue"), labels = c("mean", "median")) + 
+  ggtitle("Density of mean and median math scores by class type") + 
+  xlab("Math score") + 
+  ylab("Density") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+### 6.1.2 Categorical variables
+
+These four pie charts illustrate the distribution of key categorical variables within the dataset, including gender, urbanity, free lunch status, and class type. The dataset exhibits a nearly balanced distribution in terms of gender and free lunch status. The largest proportion of students reside in rural areas (47.4%). Additionally, the distribution of class types is relatively uniform, with 28.2% enrolled in small classes, 37.8% in regular classes, and 34% in regular classes with an aide.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 5. Distribution of categorical variables in STAR"}
+# Categorical variables
+gender_count <- star_related %>%
+  count(gender) %>%
+  mutate(Percentage = n / sum(n) * 100)
+urban_count <- star_related %>%
+  count(g1surban) %>%
+  mutate(Percentage = n / sum(n) * 100)
+freelunch_count <- star_related %>%
+  count(g1freelunch) %>%
+  mutate(Percentage = n / sum(n) * 100)
+classtype_count <- star_related %>%
+  count(g1classtype) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Pie charts for categorical variables
+gender_chart <- ggplot(gender_count, aes(x = "", y = Percentage, fill = gender)) +
+  geom_bar(stat = "identity", width = 1) + 
+  coord_polar(theta = "y") + 
+  ggtitle("Distribution of gender") +
+  theme_void() + 
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 3) + 
+  theme(legend.position = "right", legend.key.size = unit(0.5, "cm"), legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+urban_chart <- ggplot(urban_count, aes(x = "", y = Percentage, fill = g1surban)) +
+  geom_bar(stat = "identity", width = 1) + 
+  coord_polar(theta = "y") + 
+  ggtitle("Distribution of urbanity") +
+  theme_void() + 
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 3) + 
+  theme(legend.position = "right", legend.key.size = unit(0.5, "cm"), legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+freelunch_chart <- ggplot(freelunch_count, aes(x = "", y = Percentage, fill = g1freelunch)) +
+  geom_bar(stat = "identity", width = 1) + 
+  coord_polar(theta = "y") + 
+  ggtitle("Distribution of free lunch") +
+  theme_void() + 
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 3) + 
+  theme(legend.position = "right", legend.key.size = unit(0.5, "cm"), legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+classtype_chart <- ggplot(classtype_count, aes(x = "", y = Percentage, fill = g1classtype)) +
+  geom_bar(stat = "identity", width = 1) + 
+  coord_polar(theta = "y") + 
+  ggtitle("Distribution of class type") +
+  theme_void() + 
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), size = 3) + 
+  theme(legend.position = "right", legend.key.size = unit(0.5, "cm"), legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10, face = "bold"))
+
+combined_charts <- grid.arrange(gender_chart, urban_chart, freelunch_chart, classtype_chart, ncol = 2, nrow = 2)
+combined_charts
+```
+
+## 6.2 Multivariate statistics
+
+### 6.2.1 Math score vs Class type
+
+The plot illustrates the main effect of class type on math scores, showing that students in small classes achieve the highest average scores, while those in regular classes have the lowest. The regular with aide class perform slightly better than the regular class, suggesting a minor benefit of having an additional teacher aide. The error bars indicate confidence intervals, with noticeable overlap between the regular and regular with aide classes, implying no strong evidence of a significant difference between them. However, the distinct confidence interval of small class suggests a potentially meaningful difference, indicating smaller class sizes may positively impact math performance. Further statistical tests are needed to confirm the significance of these differences.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 6. Main effect plot of class type"}
+# Math score vs Class type
+summary_stats_mean <- star_related %>%
+  group_by(g1classtype, g1schid, g1surban, g1classsize, g1freelunch) %>%
+  summarize(mean = mean(g1tmathss, na.rm = TRUE))
+
+summary_stats_mean <- as.data.frame(summary_stats_mean)
+plotmeans(mean ~ g1classtype, data = summary_stats_mean, xlab="Class type", ylab="Math score",
+          main="Main Effect of class type", cex.lab = 1)
+```
+
+### 6.2.2 Math score vs Class size
+
+The scatter plot illustrates the relationship between class size and math scores, with each point representing an individual student. A negative trend is observed, as indicated by the fitted regression line, suggesting that larger class sizes are associated with lower math scores. While the data exhibit substantial variability, the overall trend implies a potential inverse correlation between class size and academic performance.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 7. Scatter plot of math score and class size"}
+# Math score vs Class size
+ggplot(summary_stats_mean, aes(x = g1classsize, y = mean)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) + 
+  ggtitle("Scatter plot of math score vs class size") + 
+  xlab("Class size") + 
+  ylab("Math score") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+### 6.2.3 Math score vs School ID
+
+The line plot illustrates the variation in mean math scores across different schools (School ID). The data exhibit substantial fluctuations, indicating considerable differences in average student performance among schools. Therefore, school ID can be treated as a random effect in this research.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 8. Math score across schools"}
+# Math score vs School ID
+summary_school <- summary_stats_mean %>%
+  group_by(g1schid) %>%
+  summarize(mean = mean(mean, na.rm = TRUE)) %>%
+  ungroup()
+
+ggplot(summary_school, aes(x = factor(g1schid), y = mean, group = 1)) + 
+  geom_line() + 
+  geom_point() + 
+  ggtitle("Mean math score across schools") + 
+  xlab("School ID") + 
+  ylab("Math score") + 
+  theme_minimal() + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+### 6.2.4 Math score vs Urbanity
+
+The plot presents the main effect of urbanity on mean math scores. Students from rural areas achieve the highest mean math scores, followed by those from urban and suburban regions, while students from inner-city schools exhibit the lowest performance.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 9. Main effect plot of urbanity"}
+# Math score vs Urbanity
+plotmeans(mean ~ g1surban, data = summary_stats_mean, xlab="Urbanity", ylab="Math score",
+          main="Main Effect of urbanity", cex.lab = 1)
+```
+
+### 6.2.5 Math score vs Free lunch
+
+The plot illustrates the main effect of free lunch status on mean math scores, comparing students who receive free lunch and those who do not. The results indicate a substantial performance gap, with students not receiving free lunch achieving significantly higher mean math scores than those who receive free lunch. The error bars, representing confidence intervals, suggest that this difference is likely consistent across the sample.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 9. Main effect plot of free lunch"}
+# Math score vs Urbanity
+plotmeans(mean ~ g1freelunch, data = summary_stats_mean, xlab="Free lunch", ylab="Math score",
+          main="Main Effect of free lunch", cex.lab = 1)
+```
+
+# 7. Inferential analysis
+
+## 7.1 Two-way ANOVA model
+
+### 7.1.1 variable determination and model selection
+
+School ID (*g1schid*) and class type (*g1classtype*) are selected as variables to evaluate their impact on math scores. Based on previous experimental results, the distribution of math scores across different school IDs exhibits considerable randomness, leading to the classification of school ID as a random effect. In contrast, since the primary objective of this study is to examine the effect of class type on math scores, class type is designated as a fixed effect. This classification allows for the formulation of a mixed-effects model, effectively accounting for both fixed and random variations in the data.
+
+### 7.1.2 Parameters and constraints
+
+The model is formulated as:
+
+$Y_{ijk} = \mu_{..} + \alpha_{i} + \beta_{j} + \epsilon_{ijk}$
+
+**Parameters:**
+
+$i$: level of class type (fixed effect), $i$ = 1, 2, 3
+
+$j$: level of school ID (random effect), $j$ = 1, 2,..., 76
+
+$k$: number of observations for each type within each school, $k$ = 1, 2,..., $n_{ij}$
+
+$Y_{ijk}$: math score for the kth student in the ith class type within the jth school
+
+$\mu_{..}$: overall mean math score across all class types and schools
+
+$\alpha_{i}$: fixed effect of the ith class type on math score
+
+$\beta_{j}$: random effect of the jth school on math score
+
+$\epsilon_{ijk}$: random error term
+
+**Constraints:**
+
+$\sum_{i=1}^{l}\alpha_{i}$ = 0
+
+$\beta_{j} \sim N(0, \sigma_{\beta}^{2})$
+
+$\epsilon_{ijk} \sim N(0, \sigma^{2})$
+
+### 7.1.3 Model assumptions
+
+The mixed-effect two way ANOVA model should obey the following assumptions:
+
+1. **Independence**: Observations should be independent.
+
+2. **Normality**:
+
+  - *Residual Normality*: The residuals ($\epsilon_{ijk}$) should follow a normal distribution.
+  
+  - *Random Effect Normality*: The random effects ($\beta_{j}$) are assumed to follow a normal distribution.
+  
+3. **Homoscedasticity**: The variance of errors should be equal across groups.
+
+### 7.1.4 Interaction deletion
+
+The result from the Type III ANOVA test indicates that the interaction effect between class type and school ID is not statistically significant (p = 0.6413 > 0.05). This suggests that the impact of class type on math scores does not vary significantly across different schools. Therefore, the interaction term will not be included in the model.
+
+```{r, include=FALSE}
+# Type III ANOVA to check interaction effect
+model_interaction <- lmer(mean ~ g1classtype * g1schid + (1 | g1schid), data = summary_stats_mean)
+Anova(model_interaction, type = "III")
+```
+
+### 7.1.5 Hypothesis
+
+For class type:
+
+$H_{0}$: the math scores are the same across all class types, i.e., $\alpha_{1} = \alpha_{2} = \alpha_{3} = 0$
+
+$H_{a}$: at least one class type has a significant effect on math scores, i.e., $\exists i \neq j, s.t. \alpha_{i} \neq \alpha_{j}$, $i, j = 1, 2, 3$
+
+For school ID:
+
+$H_{0}$: there is no variability in math scores attributed to differences between schools, i.e., $\sigma_{\beta}^{2} = 0$
+
+$H_{a}$: there is variability in math scores attributed to differences between schools, i.e., $\sigma_{\beta}^{2} > 0$
+
+### 7.1.6 Interpretation of results
+
+The results from the mixed-effects model indicate that class type has a significant impact on students' math scores. The intercept, representing the expected math score for students in small classes, is 537.208, serving as the baseline for comparison. Compared to this reference group, students in regular classes score on average 10.577 points lower, while those in regular classes with a teacher's aide score 8.015 points lower. These findings suggest that small class size provide a measurable academic advantage, as both regular class types yield significantly lower math scores. Therefore, we can reject the null hypothesis that the math scores are the same across all class types.
+
+```{r, echo=FALSE,results='asis'}
+# ANOVA results
+mixed_model <- lmer(mean ~ g1classtype + (1 | g1schid), data = summary_stats_mean)
+fixed_effects <- as.data.frame(summary(mixed_model)$coefficients)
+fixed_effects <- cbind(rownames(fixed_effects),fixed_effects)
+fixed_effects %>%
+  gt() %>%
+  tab_header(title = md("**Summary of fixed effect coefficients**")) %>%
+  fmt_number(columns = c("Estimate", "Std. Error", "df", "t value", "Pr(>|t|)"), decimals = 3) %>%
+  tab_options(
+    table.font.size = "small",
+    heading.align = "center"
+  )
+```
+
+The ICC of 34.84% indicates that school-level differences account for a substantial proportion of the total variance in math scores. Since ICC > 0.05, it strongly supports the alternative hypothesis, meaning that school-level effects should not be ignored in the analysis.
+
+```{r, include=FALSE}
+# Test for school ID
+VarCorr(mixed_model)
+ICC <- 17.253^2 / (17.253^2 + 23.593^2)
+ICC
+```
+
+### 7.1.7 Causal effects
+
+#### 7.1.7.1 Hypothesis
+
+$H_{0}$: There is no causal effect of class type on math scores.
+
+$H_{a}$: Class type has a causal effect on math scores.
+
+#### 7.1.7.2 Conduct Tukey HSD Test
+
+The Tukey HSD test results indicate that class size has a significant impact on students' math scores (p=1.363e-05). Specifically, students in regular classes scored significantly lower than those in small classes, as evidenced by a confidence interval entirely below zero. Similarly, students in regular classes with aide also scored significantly lower than those in small classes. However, the comparison between regular classes with aide and regular classes shows no statistically significant difference, implying that the presence of an aide does not substantially improve students' math performance in larger classes.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 10. Tukey HSD test for class type"}
+# Tukey HSD test
+tukey_model <- aov(mean ~ g1classtype, data = summary_stats_mean)
+tukey_results <- TukeyHSD(tukey_model)
+tukey_df <- as.data.frame(tukey_results$g1classtype)
+tukey_df$Comparison <- rownames(tukey_df)
+
+ggplot(tukey_df, aes(x = Comparison, y = diff, ymin = lwr, ymax = upr)) +
+  geom_pointrange() +
+  coord_flip() + 
+  labs(title = "Tukey HSD Test Results",
+       x = "Class Type Comparison",
+       y = "Mean Difference")
+```
+
+```{r, echo=FALSE, results='hide'}
+Anova(mixed_model, type = "III")
+```
+
+
+The findings reinforce that students in smaller classes tend to achieve higher math scores, while larger class sizes, even with an aide, lead to lower performance. The two-way ANOVA model confirms that class type significantly affects math scores, suggesting a causal relationship. Since we control for school variation as a random effect, the impact of class type is robust to differences across schools.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 11. Causal effect plot of class type on math scores"}
+# Causal effects
+causal_effects <- data.frame(
+  ClassType = c("Small Class", "Regular Class", "Regular + Aide Class"),
+  Estimate = fixef(mixed_model),
+  SE = summary(mixed_model)$coefficients[,2]
+)
+
+# 95% C.I.
+causal_effects$Lower <- causal_effects$Estimate - 1.96 * causal_effects$SE
+causal_effects$Upper <- causal_effects$Estimate + 1.96 * causal_effects$SE
+
+causal_effects[1, c("Estimate", "Lower", "Upper")] <- causal_effects[1, c("Estimate", "Lower", "Upper")] - causal_effects[1, "Estimate"]
+
+ggplot(causal_effects, aes(x = ClassType, y = Estimate)) +
+  geom_point(size = 4, color = "blue") + 
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2, color = "black") + 
+  theme_minimal() +
+  labs(title = "Estimated Causal Effect of Class Type on Math Scores",
+       x = "Class Type",
+       y = "Estimated Effect on Math Score") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+## 7.2 Complete model analysis
+
+### 7.2.1 variable determination and model selection
+
+Urbanity (*g1surban*) and free lunch status (*g1freelunch*) are incorporated into the model to evaluate their impact on math scores. These variables will be clarified as fixed effects.
+
+### 7.2.2 Parameters and constraints
+
+The model is formulated as:
+
+$Y_{ijklm} = \mu + \alpha_{i} + \beta_{j} + \gamma_{k} + \delta_{l} + \epsilon_{ijklm}$
+
+**Parameters:**
+
+$i$: level of class type (fixed effect), $i$ = 1, 2, 3
+
+$j$: level of school ID (random effect), $j$ = 1, 2,..., 76
+
+$k$: level of urbanity (fixed effect), $k$ = 1, 2, 3, 4
+
+$l$: level of free lunch status (fixed effect), $l$ = 1, 2
+
+$m$: number of observations for each type within each school, $n$ = 1, 2,..., $n_{ijkl}$
+
+$Y_{ijklmn}$: math score for the kth student in the ith class type within the jth school, kth level of urbanity, and lth level of free lunch
+
+$\mu$: overall mean math score across all class types, schools, urbanity levels, and free lunch levels   
+
+$\alpha_{i}$: fixed effect of the ith class type on math score
+
+$\beta_{j}$: random effect of the jth school on math score
+
+$\gamma_{k}$: fixed effect of the kth urbanity type on math score
+
+$\delta_{l}$: fixed effect of the lth free lunch status on math score
+
+$\epsilon_{ijklmn}$: random error term
+
+**Constraints:**
+
+$\sum_{i}\alpha_{i}$ = 0, $\sum_{k}\gamma_{k}$ = 0, $\sum_{l}\delta_{l}$ = 0
+
+$\beta_{j} \sim N(0, \sigma_{\beta}^{2})$
+
+$\epsilon_{ijk} \sim N(0, \sigma^{2})$
+
+### 7.2.3 Model fitting
+
+The results from the extended mixed-effects model indicate that multiple factors, including urbanity and free lunch status, significantly impact students' math scores. The results suggest that students from rural areas score significantly higher than those from inner-city schools, with an estimated increase of 17.911 points (p=0.001), while students from suburban and urban areas do no exhibit statistically significant differences compared to the reference category. Furthermore, free lunch status plays a crucial role in academic performance. Students who do not receive free lunch score, on average, 19.071 points higher than those who do. Overall, the inclusion of additional variables in the model provides a more comprehensive understanding of the factors influencing math scores.
+
+```{r, echo=FALSE,results='asis'}
+# ANOVA results 2
+mixed_model2 <- lmer(mean ~ g1classtype + (1 | g1schid) + g1surban + g1freelunch, data = summary_stats_mean)
+fixed_effects2 <- as.data.frame(summary(mixed_model2)$coefficients)
+fixed_effects2 <- cbind(rownames(fixed_effects2),fixed_effects2)
+fixed_effects2 %>%
+  gt() %>%
+  tab_header(title = md("**Summary of fixed effect coefficients**")) %>%
+  fmt_number(columns = c("Estimate", "Std. Error", "df", "t value", "Pr(>|t|)"), decimals = 3) %>%
+  tab_options(
+    table.font.size = "small",
+    heading.align = "center"
+  )
+```
+
+# 8. Sensitivity analysis
+
+## 8.1 Model diagnostics
+
+**Independence**: Since there are no discernible pattern in the residuals, the independence assumption holds.
+
+**Normality**: Both the residuals and the random effects show no significant departure from normality, which supports the model assumptions.
+
+**Homoscedasticity**: The residuals appear fairly randomly distributed, indicating no major violations of homoscedasticity, while some slight variance differences do exist.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 11. Model diagnostics"}
+par(mfrow = c(2,2))
+
+# Fitted values vs residuals
+residual_data <- data.frame(
+  Fitted = fitted(mixed_model),
+  Residuals = resid(mixed_model, type = "pearson")
+)
+
+ggplot(residual_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Math Scores",
+       y = "Pearson Residuals") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+
+# Q-Q Plot
+qqnorm(resid(mixed_model),main="Normal Q-Q Plot of residuals")
+qqline(resid(mixed_model), col = "red")
+
+# Q-Q Plot
+random_effects <- ranef(mixed_model)$g1schid[, "(Intercept)"]
+random_effects_named <- as.numeric(random_effects)
+qqnorm(random_effects_named, main = "Normal Q-Q Plot of random effects")
+qqline(random_effects_named, col = "red")
+```
+
+## 8.2 Median evaluation
+
+While the mean offers certain advantages in statistical analysis, the median also presents notable benefits. Specially, the median is less susceptible to the influence of extreme values, making it a more robust measure of central tendency in the presence of outliers.
+
+Replicating the analysis conducted in Section 6.2 using the median yields results consistent with those obtained from the mean. This alignment enhances the robustness of the findings and strengthens the reliability of the conclusion drawn.
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 12. Main effect plot of class type"}
+# Math score vs Class type
+summary_stats_median <- star_related %>%
+  group_by(g1classtype, g1schid, g1surban, g1classsize, g1freelunch) %>%
+  summarize(median = median(g1tmathss, na.rm = TRUE))
+
+summary_stats_median <- as.data.frame(summary_stats_median)
+plotmeans(median ~ g1classtype, data = summary_stats_median, xlab="Class type", ylab="Math score",
+          main="Main Effect of class type", cex.lab = 1)
+```
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 13. Scatter plot of math score and class size"}
+# Math score vs Class size
+ggplot(summary_stats_median, aes(x = g1classsize, y = median)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) + 
+  ggtitle("Scatter plot of math score vs class size") + 
+  xlab("Class size") + 
+  ylab("Math score") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 14. Math score across schools"}
+# Math score vs School ID
+summary_school_median <- summary_stats_median %>%
+  group_by(g1schid) %>%
+  summarize(median = median(median, na.rm = TRUE)) %>%
+  ungroup()
+
+ggplot(summary_school_median, aes(x = factor(g1schid), y = median, group = 1)) + 
+  geom_line() + 
+  geom_point() + 
+  ggtitle("Median math score across schools") + 
+  xlab("School ID") + 
+  ylab("Math score") + 
+  theme_minimal() + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+```
+
+```{r, echo=FALSE,results='asis'}
+# ANOVA results
+mixed_model_median <- lmer(median ~ g1classtype + (1 | g1schid), data = summary_stats_median)
+fixed_effects_median <- as.data.frame(summary(mixed_model_median)$coefficients)
+fixed_effects_median <- cbind(rownames(fixed_effects_median),fixed_effects_median)
+fixed_effects_median %>%
+  gt() %>%
+  tab_header(title = md("**Summary of fixed effect coefficients**")) %>%
+  fmt_number(columns = c("Estimate", "Std. Error", "df", "t value", "Pr(>|t|)"), decimals = 3) %>%
+  tab_options(
+    table.font.size = "small",
+    heading.align = "center"
+  )
+```
+
+```{r, include=FALSE}
+# Test for school ID
+VarCorr(mixed_model_median)
+ICC2 <- 18.250^2 / (18.250^2 + 24.272^2)
+ICC2
+```
+
+```{r, echo=FALSE, results='hide', warning=FALSE, fig.height=4, fig.width=6, fig.align='center', fig.cap="Figure 15. Tukey HSD test for class type"}
+# Tukey HSD test
+tukey_model_median <- aov(median ~ g1classtype, data = summary_stats_median)
+tukey_results_median <- TukeyHSD(tukey_model_median)
+tukey_df_median <- as.data.frame(tukey_results_median$g1classtype)
+tukey_df_median$Comparison <- rownames(tukey_df_median)
+
+ggplot(tukey_df_median, aes(x = Comparison, y = diff, ymin = lwr, ymax = upr)) +
+  geom_pointrange() +
+  coord_flip() + 
+  labs(title = "Tukey HSD Test Results",
+       x = "Class Type Comparison",
+       y = "Median Difference")
+```
+
+# 9. Discussion
+The findings of this study align with previous research demonstrating that class size influences academic performance. The results from the mixed-effects model suggest a statistically significant effect of class type on first-grade math scores, with smaller class sizes yielding higher scores. The ANOVA test confirmed that class type significantly impacts student outcomes, while the lack of significance in the interaction term suggests that the effect of class type is consistent across different schools. Residual diagnostics and normality checks indicate that the model assumptions were met, lending credibility to the findings. However, the study is limited by potential unobserved confounding factors that were not accounted for in the dataset. Future research should explore longitudinal effects and additional covariates, such as teacher experience and instructional methods, to provide a more comprehensive understanding of the factors influencing student achievement.
+
+# 10. Acknowledgement
+Suggestions from Professor Dr. Shizhe Chen and TA Mr. Yanhao Jin
+
+# 11. Reference
+Krueger, A. B. (1999). Experimental estimates of education production functions. The Quarterly Journal of Economics, 114(2), 497-532.
+
+Nye, B., Hedges, L. V., & Konstantopoulos, S. (2000). The effects of small classes on academic achievement: The results of the Tennessee class size experiment. American Educational Research Journal, 37(1), 123-151.
+
+Schanzenbach, D. W. (2006). What have researchers learned from Project STAR? Brookings Papers on Education Policy, 9, 205-228.
+
+Finn, J. D., & Achilles, C. M. (1999). Tennessee's class size study: Findings, implications, misconceptions. Educational Evaluation and Policy Analysis, 21(2), 97-109.
+
+# 12. Session info
+```{r}
+sessionInfo()
+```
